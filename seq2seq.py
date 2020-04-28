@@ -11,13 +11,16 @@ class Encoder(nn.Module):
     def __init__(self, vocab_size, embed_size, hidden_size, dropout):
         super(Encoder, self).__init__()
         self.embedding = nn.Embedding(vocab_size, embed_size)
-        self.gru_rnn = nn.GRU(embed_size, hidden_size, dropout=0, bidirectional=True)
+        self.gru_rnn = nn.GRU(embed_size, hidden_size, dropout=dropout, bidirectional=True)
 
-    def forward(self, input):
+    def forward(self, input, src_len):
         # input : [max_len, batch_size]
         embedded = self.embedding(input)
         # embedded : [max_len, batch_size, embed_size]
-        outputs, state = self.gru_rnn(embedded)
+        
+        packed_embedded = nn.utils.rnn.pack_padded_sequence(embedded, src_len, enforce_sorted=False)
+        packed_outputs, state = self.gru_rnn(packed_embedded)
+        outputs, _ = nn.utils.rnn.pad_packed_sequence(packed_outputs)
         state = state.view(1, state.shape[1], -1)
         # outputs = [sen_len, batch_size, hid_dim * n_directions]
         # state = [n_layers * n_direction, batch_size, hid_dim]
@@ -32,7 +35,7 @@ class Decoder(nn.Module):
         self.gru_rnn = nn.GRU(embed_size, hidden_size*2, dropout=dropout, bidirectional=False)
         self.linear = nn.Linear(hidden_size * 4, vocab_size)
 
-    def forward(self, target, prev_state, enc_outputs):
+    def forward(self, target, prev_state, enc_outputs, mask):
         target = target.unsqueeze(0)
         # target : [1, batch_size]
         embedded = self.embedding(target)
@@ -45,8 +48,11 @@ class Decoder(nn.Module):
         # outputs = [sen_len, batch_size, hid_dim * n_directions]
         # state = [n_layers * n_direction, batch_size, hid_dim]
 
-        alignment = self.attention(enc_outputs, state)
+        alignment = self.attention(enc_outputs, state).squeeze(2)
 
+
+        alignment = alignment.masked_fill(mask == 0, -1e10)
+        alignment = alignment.unsqueeze(2)
         attn_weights = F.softmax(alignment, dim=0)
         attn_weights = attn_weights.permute([0, 2, 1])
         enc_outputs = enc_outputs.permute([1, 0, 2])
@@ -80,9 +86,11 @@ class Seq2Seq(nn.Module):
         self.encoder = encoder
         self.decoder = decoder
 
-    def forward(self, input, target, teacher_forcing_ratio):
+    def forward(self, input, target, teacher_forcing_ratio, lens_input):
 
-        enc_outputs, prev_state = self.encoder(input)
+        mask = self.create_mask(input)
+
+        enc_outputs, prev_state = self.encoder(input, lens_input)
 
         batch_size = input.shape[1]
         max_len = target.shape[0]
@@ -93,7 +101,7 @@ class Seq2Seq(nn.Module):
         input_dec = target[0, :]
 
         for t in range(1, max_len):
-            output, prev_state = self.decoder(input_dec, prev_state, enc_outputs)
+            output, prev_state = self.decoder(input_dec, prev_state, enc_outputs, mask)
             outputs[t] = output
             top1 = output.argmax(1)
             # decide if we are going to use teacher forcing or not.
@@ -101,3 +109,8 @@ class Seq2Seq(nn.Module):
             input_dec = target[t] if teacher_force else top1
 
         return outputs
+
+
+    def create_mask(self, src):
+        mask = (src != 0).permute(1, 0)
+        return mask

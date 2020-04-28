@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from seq2seq import Decoder, Encoder, Seq2Seq
+from seq2seqbetter import Decoder, Encoder, Seq2Seq
 from tokenizers import (BertWordPieceTokenizer, ByteLevelBPETokenizer,
                         CharBPETokenizer, SentencePieceBPETokenizer)
 from torch.utils.data import DataLoader
@@ -59,8 +59,8 @@ with open('Translation_dataset/test.fr') as test_fr_file:
 # with open('Translation_dataset/test_en_fr_char_ids.txt', mode='w') as test_file:
 #     for sample in test:
 #         test_file.write(' '.join(map(str, sample)) + '\n')
-train_loader = DataLoader(list(zip(train_input, train_gold)), batch_size=64, shuffle=True, drop_last=True)
 
+batch_size = 32
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 epochs = 5
 input_dim = tokenizer.get_vocab_size()
@@ -68,26 +68,29 @@ output_dim = input_dim
 emb_dim = 200
 hid_dim = 100
 attn_dim = 40
-drop = 0
+drop = 0.5
 clip = 1
-encoder = Encoder(input_dim, emb_dim, hid_dim, drop)
-decoder = Decoder(output_dim, emb_dim, hid_dim, drop)
-model = Seq2Seq(encoder, decoder, device).to(device=device)
+pad_ids = 0
+encoder = Encoder(input_dim, emb_dim, hid_dim, hid_dim, drop)
+decoder = Decoder(output_dim, emb_dim, hid_dim, hid_dim, drop)
+model = Seq2Seq(encoder, decoder, pad_ids, device).to(device=device)
 
+train_loader = DataLoader(list(zip(train_input, train_gold)), batch_size=batch_size, shuffle=True, drop_last=True)
 
 def init_weights(m: nn.Module):
     for name, param in m.named_parameters():
         if 'weight' in name:
-            nn.init.normal_(param.data, mean=0, std=0.01)
+            nn.init.kaiming_normal_(param.data)
         else:
             nn.init.constant_(param.data, 0)
 
 
 model.apply(init_weights)
 
-optimizer = optim.Adagrad(model.parameters(), lr=0.1)
+optimizer = optim.Adagrad(model.parameters(), lr=0.01)
 
-loss_function = nn.CrossEntropyLoss(ignore_index=0)
+
+loss_function = nn.CrossEntropyLoss(ignore_index=pad_ids)
 
 
 def train(model, iterator, optimizer, loss_function, clip):
@@ -97,10 +100,18 @@ def train(model, iterator, optimizer, loss_function, clip):
     epoch_loss = 0
 
     for input_batch, target_batch in iterator:
+
+        lens_input = list(map(len, [tokenizer.encode(x).ids for x in input_batch]))
+        batch_sorted = list(zip(lens_input, input_batch, target_batch))
+        batch_sorted.sort(reverse=True)
+        lens_input, input_batch, target_batch = zip(*(batch_sorted))
+        lens_input = torch.tensor(lens_input).to(device=device)
+
+        print(input_batch[0])
         print(target_batch[0])
-        batch = tokenizer.encode_batch(list(input_batch) + list(target_batch))
-        input_batch = batch[:64]
-        target_batch = batch[64:]
+
+        input_batch = tokenizer.encode_batch(list(input_batch))
+        target_batch = tokenizer.encode_batch(list(target_batch))
 
         input_batch = [tokenizer.post_process(item).ids for item in input_batch]
         input_batch = torch.tensor(input_batch).to(device).permute([1, 0]).clone()
@@ -111,9 +122,7 @@ def train(model, iterator, optimizer, loss_function, clip):
 
         optimizer.zero_grad()
 
-        outputs = model(input_batch, target_batch, 1)
-
-        
+        outputs = model(input_batch, lens_input, target_batch, 1)
 
         logits = outputs[1:].view(-1, output_dim)
         target_batch = target_batch[1:].view(-1)
@@ -134,4 +143,6 @@ def train(model, iterator, optimizer, loss_function, clip):
         print(loss.item())
 
 
-train(model, train_loader, optimizer, loss_function, clip)
+for epoch in range(epochs):
+
+    train(model, train_loader, optimizer, loss_function, clip)
