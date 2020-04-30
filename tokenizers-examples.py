@@ -65,13 +65,13 @@ with open('Translation_dataset/test.fr') as test_fr_file:
 #     for sample in test:
 #         test_file.write(' '.join(map(str, sample)) + '\n')
 
-batch_size = 32
+batch_size = 50
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 epochs = 5
 input_dim = tokenizer.get_vocab_size()
 output_dim = input_dim
-emb_dim = 200
-hid_dim = 100
+emb_dim = 300
+hid_dim = 200
 attn_dim = 40
 drop = 0.5
 clip = 1
@@ -103,11 +103,10 @@ loss_function = nn.CrossEntropyLoss(ignore_index=pad_ids)
 
 def train(model, iterator, optimizer, loss_function, clip):
 
-    model.train()
-
     epoch_loss = 0
 
     for input_batch, target_batch in iterator:
+        model.train()
 
         lens_input = list(map(len, [tokenizer.encode(x).ids for x in input_batch]))
         batch_sorted = list(zip(lens_input, input_batch, target_batch))
@@ -122,11 +121,10 @@ def train(model, iterator, optimizer, loss_function, clip):
         target_batch = tokenizer.encode_batch(list(target_batch))
 
         input_batch = [tokenizer.post_process(item).ids for item in input_batch]
-        input_batch = torch.tensor(input_batch).to(device).permute([1, 0]).clone()
+        input_batch = torch.tensor(input_batch).to(device).permute([1, 0])
 
         target_batch = [tokenizer.post_process(item).ids for item in target_batch]
-        target_batch = torch.tensor(target_batch).to(device).permute([1, 0])
-        target_batch = target_batch.clone()
+        target_batch = torch.tensor(target_batch).to(device).permute([1, 0]).contiguous()
 
         optimizer.zero_grad()
 
@@ -152,7 +150,7 @@ def train(model, iterator, optimizer, loss_function, clip):
 
         epoch_loss += loss.item()
 
-        return epoch_loss / len(iterator)
+    return epoch_loss / len(iterator)
 
 
 def evaluate(model, iterator, criterion):
@@ -167,18 +165,17 @@ def evaluate(model, iterator, criterion):
             lens_input, input_batch, target_batch = zip(*(batch_sorted))
             lens_input = torch.tensor(lens_input).to(device=device)
 
-            print(input_batch[0])
-            print(target_batch[0])
+            # print(input_batch[0])
+            # print(target_batch[0])
 
             input_batch = tokenizer.encode_batch(list(input_batch))
             target_batch = tokenizer.encode_batch(list(target_batch))
 
             input_batch = [tokenizer.post_process(item).ids for item in input_batch]
-            input_batch = torch.tensor(input_batch).to(device).permute([1, 0]).clone()
+            input_batch = torch.tensor(input_batch).to(device).permute([1, 0]).contiguous()
 
             target_batch = [tokenizer.post_process(item).ids for item in target_batch]
-            target_batch = torch.tensor(target_batch).to(device).permute([1, 0])
-            target_batch = target_batch.clone()
+            target_batch = torch.tensor(target_batch).to(device).permute([1, 0]).contiguous()
 
             output = model(input_batch, lens_input, target_batch, 0)  # turn off teacher forcing
             # trg = [trg len, batch size]

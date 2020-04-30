@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from seq2seqbetter import Attention, Decoder, Encoder, Seq2Seq
+from seq2seqbetter import Decoder, Encoder, Seq2Seq
 from torchtext.data import BucketIterator, Field
 from torchtext.datasets import Multi30k, TranslationDataset
 
@@ -71,9 +71,9 @@ ENC_DROPOUT = 0.5
 DEC_DROPOUT = 0.5
 SRC_PAD_IDX = SRC.vocab.stoi[SRC.pad_token]
 
-attn = Attention(ENC_HID_DIM, DEC_HID_DIM)
+# attn = Attention(ENC_HID_DIM, DEC_HID_DIM)
 enc = Encoder(INPUT_DIM, ENC_EMB_DIM, ENC_HID_DIM, DEC_HID_DIM, ENC_DROPOUT)
-dec = Decoder(OUTPUT_DIM, DEC_EMB_DIM, ENC_HID_DIM, DEC_HID_DIM, DEC_DROPOUT, attn)
+dec = Decoder(OUTPUT_DIM, DEC_EMB_DIM, ENC_HID_DIM, DEC_HID_DIM, DEC_DROPOUT)
 
 model = Seq2Seq(enc, dec, SRC_PAD_IDX, device).to(device)
 
