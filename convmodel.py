@@ -29,9 +29,8 @@ class Encoder(nn.Module):
             out_channels=hid_dim * 2,
             kernel_size=kernel_size,
             padding=(kernel_size - 1) // 2,
-            ) for _ in range(n_layers)
-        ])
-        self.droput = nn.Dropout(dropout)
+            ) for _ in range(n_layers)])
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, src):
         # src : [batch_size, max_len]
@@ -45,20 +44,20 @@ class Encoder(nn.Module):
 
         # pos : [batch_size, max_len]
 
-        tok_embedded = self.tod_embedding(src)
+        tok_embedded = self.tok_embedding(src)
         pos_embedded = self.pos_embedding(pos)
 
         # pos/tok embedding : [batch_size, max_len, embedding]
 
-        embedded = nn.dropout(tok_embedded + pos_embedded)
+        embedded = self.dropout(tok_embedded + pos_embedded)
 
         # same as pos/tiok emb
 
-        conv_input = nn.emb2hid(embedded)
+        conv_input = self.emb2hid(embedded)
 
         # conv_input : [batch_size, max_len, hid_dim]
 
-        conv_input = conv_input.permute([1, 2, 0])
+        conv_input = conv_input.permute([0, 2, 1])
 
         # conv_input : [batch_size, hid_dim, max_len]
 
@@ -71,7 +70,7 @@ class Encoder(nn.Module):
 
             # conved : [batch_size, hid_dim, max_len]
 
-            conved = (conved + embedded) * self.scale
+            conved = (conved + conv_input) * self.scale
 
             # same as before
 
@@ -127,7 +126,7 @@ class Decoder(nn.Module):
             in_channels=hid_dim,
             out_channels=2 * hid_dim,
             kernel_size=kernel_size
-            )] for _ in range(n_layers))
+            ) for _ in range(n_layers)])
 
         self.dropout = nn.Dropout(dropout)
 
@@ -137,7 +136,7 @@ class Decoder(nn.Module):
         # encoder_conved = encoder_combined : [batch_size, max_len, emb_dim]
 
         batch_size = trg.shape[0]
-        max_len = encoder_combined.shape[1]
+        max_len = trg.shape[1]
 
         pos = torch.arange(0, max_len).unsqueeze(0).repeat(batch_size, 1).to(self.device)
 
@@ -244,7 +243,7 @@ class Decoder(nn.Module):
 
         # attended_encoding : [batch_size, max_len_trg, hid_dim]
 
-        attended_combined = (conved, attended_encoding.permute(0, 2, 1)) * self.scale
+        attended_combined = (conved + attended_encoding.permute([0, 2, 1])) * self.scale
 
         return attention, attended_combined
 
@@ -267,7 +266,7 @@ class Seq2Seq(nn.Module):
 
         # encoder_conved/combined : [batch_size, max_len_src, emb_dim]
 
-        output, attention = self.decoder(src, trg)
+        output, attention = self.decoder(trg, encoder_conved, encoder_combined)
 
         # output : [batch_size, max_len_trg - 1, vocab_size]
         # attention : [batch_size, max_len_trg - 1, max_len_src]

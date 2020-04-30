@@ -1,10 +1,11 @@
 import math
 import time
 
+import convmodel
+import seq2seqbetter
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from seq2seqbetter import Decoder, Encoder, Seq2Seq
 from tokenizers import (BertWordPieceTokenizer, ByteLevelBPETokenizer,
                         CharBPETokenizer, SentencePieceBPETokenizer)
 from torch.utils.data import DataLoader
@@ -68,17 +69,41 @@ with open('Translation_dataset/test.fr') as test_fr_file:
 batch_size = 50
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 epochs = 5
-input_dim = tokenizer.get_vocab_size()
-output_dim = input_dim
-emb_dim = 300
-hid_dim = 200
-attn_dim = 40
-drop = 0.5
 clip = 1
 pad_ids = 0
-encoder = Encoder(input_dim, emb_dim, hid_dim, hid_dim, drop)
-decoder = Decoder(output_dim, emb_dim, hid_dim, hid_dim, drop)
-model = Seq2Seq(encoder, decoder, pad_ids, device).to(device=device)
+model_type = 'CONV'
+if model_type == 'RNN':
+    input_dim = tokenizer.get_vocab_size()
+    output_dim = input_dim
+    emb_dim = 300
+    hid_dim = 200
+    attn_dim = 40
+    drop = 0.5
+
+if model_type == 'CONV':
+    input_dim = tokenizer.get_vocab_size()
+    emb_dim = 300
+    hid_dim = 512  # each conv. layer has 2 * hid_dim filters
+    layers = 10  # number of conv. blocks in encoder
+    kernel_size = 3
+    conv_dropout = 0.25
+
+if model_type == 'RNN':
+    encoder = seq2seqbetter.Encoder(input_dim, emb_dim, hid_dim, hid_dim, drop)
+    decoder = seq2seqbetter.Decoder(output_dim, emb_dim, hid_dim, hid_dim, drop)
+    model = seq2seqbetter.Seq2Seq(encoder, decoder, pad_ids, device).to(device=device)
+if model_type == 'CONV':
+    encoder = convmodel.Encoder(input_dim, emb_dim, hid_dim, layers, kernel_size, conv_dropout, device)
+    decoder = convmodel.Decoder(
+        input_dim,
+        emb_dim,
+        hid_dim,
+        layers,
+        kernel_size,
+        conv_dropout,
+        pad_ids,
+        device)
+    model = convmodel.Seq2Seq(encoder, decoder).to(device=device)
 
 train_loader = DataLoader(list(zip(train_input, train_gold)), batch_size=batch_size, shuffle=True, drop_last=True)
 val_loader = DataLoader(list(zip(val_input, val_gold)), batch_size=batch_size, shuffle=True, drop_last=True)
@@ -95,7 +120,7 @@ def init_weights(m: nn.Module):
 
 model.apply(init_weights)
 
-optimizer = optim.Adagrad(model.parameters(), lr=0.01)
+optimizer = optim.Adam(model.parameters())
 
 
 loss_function = nn.CrossEntropyLoss(ignore_index=pad_ids)
@@ -114,8 +139,8 @@ def train(model, iterator, optimizer, loss_function, clip):
         lens_input, input_batch, target_batch = zip(*(batch_sorted))
         lens_input = torch.tensor(lens_input).to(device=device)
 
-        print(input_batch[0])
-        print(target_batch[0])
+        # print(input_batch[0])
+        # print(target_batch[0])
 
         input_batch = tokenizer.encode_batch(list(input_batch))
         target_batch = tokenizer.encode_batch(list(target_batch))
@@ -128,10 +153,30 @@ def train(model, iterator, optimizer, loss_function, clip):
 
         optimizer.zero_grad()
 
-        outputs = model(input_batch, lens_input, target_batch, 1)
+        if model_type == 'RNN':
 
-        logits = outputs[1:].view(-1, output_dim)
-        target_batch = target_batch[1:].view(-1)
+            outputs = model(input_batch, lens_input, target_batch, 1)
+
+            output_dim = outputs.shape[-1]
+
+            logits = outputs[1:].view(-1, output_dim)
+            target_batch = target_batch[1:].view(-1)
+
+        if model_type == 'CONV':
+            output, _ = model(input_batch.permute([1, 0]), target_batch.permute([1, 0])[:, :-1])
+
+            # output = [batch size, trg len - 1, output dim]
+            # trg = [batch size, trg len]
+
+            outputs = output.permute([1, 0, 2])
+
+            output_dim = output.shape[-1]
+
+            logits = output.contiguous().view(-1, output_dim)
+            target_batch = target_batch.permute([1, 0])[:, 1:].contiguous().view(-1)
+
+            # output = [batch size * trg len - 1, output dim]
+            # trg = [batch size * trg len - 1]
 
         loss = loss_function(logits, target_batch)
 
@@ -144,9 +189,9 @@ def train(model, iterator, optimizer, loss_function, clip):
 
         my_string = outputs.argmax(2)
 
-        print(tokenizer.decode(list(my_string[1:, 0])))
+        # print(tokenizer.decode(list(my_string[1:, 0])))
 
-        print(loss.item())
+        # print(loss.item())
 
         epoch_loss += loss.item()
 
@@ -176,17 +221,32 @@ def evaluate(model, iterator, criterion):
 
             target_batch = [tokenizer.post_process(item).ids for item in target_batch]
             target_batch = torch.tensor(target_batch).to(device).permute([1, 0]).contiguous()
+            if model_type == 'RNN':
+                output = model(input_batch, lens_input, target_batch, 0)  # turn off teacher forcing
+                # trg = [trg len, batch size]
+                # output = [trg len, batch size, output dim]
 
-            output = model(input_batch, lens_input, target_batch, 0)  # turn off teacher forcing
-            # trg = [trg len, batch size]
-            # output = [trg len, batch size, output dim]
+                output_dim = output.shape[-1]
+                output = output[1:].view(-1, output_dim)
+                target_batch = target_batch[1:].view(-1)
 
-            output_dim = output.shape[-1]
-            output = output[1:].view(-1, output_dim)
-            target_batch = target_batch[1:].view(-1)
+                # trg = [(trg len - 1) * batch size]
+                # output = [(trg len - 1) * batch size, output dim]
+            if model_type == 'CONV':
+                output, _ = model(input_batch.permute([1, 0]), target_batch.permute([1, 0])[:, :-1])
 
-            # trg = [(trg len - 1) * batch size]
-            # output = [(trg len - 1) * batch size, output dim]
+                # output = [batch size, trg len - 1, output dim]
+                # trg = [batch size, trg len]
+
+                outputs = output.permute([1, 0, 2])
+
+                output_dim = output.shape[-1]
+
+                logits = output.contiguous().view(-1, output_dim)
+                target_batch = target_batch.permute([1, 0])[:, 1:].contiguous().view(-1)
+
+                # output = [batch size * trg len - 1, output dim]
+                # trg = [batch size * trg len - 1]
 
             loss = criterion(output, target_batch)
 
