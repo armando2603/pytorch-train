@@ -13,7 +13,7 @@ from tqdm import tqdm
 
 tokenizer = CharBPETokenizer()
 tokenizer.train(
-    ['Translation_dataset/train.en', 'Translation_dataset/train.fr'],
+    ['Translation_dataset/train.de', 'Translation_dataset/train.en'],
     vocab_size=5000,
     special_tokens=['<pad>', '<sos>', '<eos>']
     )
@@ -26,12 +26,12 @@ output = tokenizer.post_process(output[1])
 # print(output.ids, output.tokens)
 # print(tokenizer.decode(output.ids))
 train_input = []
-with open('Translation_dataset/train.en') as train_en_file:
-    for line in train_en_file.readlines():
+with open('Translation_dataset/train.de') as train_src_file:
+    for line in train_src_file.readlines():
         train_input.append('<sos> ' + line[:-1] + ' <eos>')
 train_gold = []
-with open('Translation_dataset/train.fr') as train_fr_file:
-    for line in train_fr_file.readlines():
+with open('Translation_dataset/train.en') as train_trg_file:
+    for line in train_trg_file.readlines():
         train_gold.append('<sos> ' + line[:-1] + ' <eos>')
 
 # with open('Translation_dataset/train_en_fr_char_ids.txt', mode='w') as train_file:
@@ -40,12 +40,12 @@ with open('Translation_dataset/train.fr') as train_fr_file:
 
 val_input = []
 val_gold = []
-with open('Translation_dataset/val.en') as val_en_file:
-    for line in val_en_file.readlines():
+with open('Translation_dataset/val.de') as val_src_file:
+    for line in val_src_file.readlines():
         val_input.append('<sos> ' + line[:-1] + ' <eos>')
 
-with open('Translation_dataset/val.fr') as val_fr_file:
-    for line in val_fr_file.readlines():
+with open('Translation_dataset/val.en') as val_trg_file:
+    for line in val_trg_file.readlines():
         val_gold.append('<sos> ' + line[:-1] + ' <eos>')
 
 # with open('Translation_dataset/val_en_fr_char_ids.txt', mode='w') as val_file:
@@ -54,12 +54,12 @@ with open('Translation_dataset/val.fr') as val_fr_file:
 
 test_input = []
 test_gold = []
-with open('Translation_dataset/test.en') as test_en_file:
-    for line in test_en_file.readlines():
+with open('Translation_dataset/test.de') as test_src_file:
+    for line in test_src_file.readlines():
         test_input.append('<sos> ' + line[:-1] + ' <eos>')
 
-with open('Translation_dataset/test.fr') as test_fr_file:
-    for line in test_fr_file.readlines():
+with open('Translation_dataset/test.en') as test_trg_file:
+    for line in test_trg_file.readlines():
         test_gold.append('<sos> ' + line[:-1] + ' <eos>')
 
 # with open('Translation_dataset/test_en_fr_char_ids.txt', mode='w') as test_file:
@@ -238,11 +238,9 @@ def evaluate(model, iterator, criterion):
                 # output = [batch size, trg len - 1, output dim]
                 # trg = [batch size, trg len]
 
-                outputs = output.permute([1, 0, 2])
-
                 output_dim = output.shape[-1]
 
-                logits = output.contiguous().view(-1, output_dim)
+                output = output.contiguous().view(-1, output_dim)
                 target_batch = target_batch.permute([1, 0])[:, 1:].contiguous().view(-1)
 
                 # output = [batch size * trg len - 1, output dim]
