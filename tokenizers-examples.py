@@ -2,11 +2,12 @@ import math
 import time
 
 import convmodel
+# import transformermodel
+import original_transformer as transformermodel
 import seq2seqbetter
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import transformermodel
 from tokenizers import (BertWordPieceTokenizer, ByteLevelBPETokenizer,
                         CharBPETokenizer, SentencePieceBPETokenizer)
 from torch.utils.data import DataLoader
@@ -249,11 +250,11 @@ def train(model, iterator, optimizer, loss_function, clip):
 
         model.eval()
 
-        my_string = outputs.argmax(2)
+        # my_string = outputs.argmax(2)
 
-        print(tokenizer_trg.decode(list(my_string[1:, 0])))
+        # print(tokenizer_trg.decode(list(my_string[1:, 0])))
 
-        print(loss.item())
+        # print(loss.item())
 
         epoch_loss += loss.item()
 
