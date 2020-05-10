@@ -12,15 +12,25 @@ from tokenizers import (BertWordPieceTokenizer, ByteLevelBPETokenizer,
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-tokenizer = CharBPETokenizer()
-tokenizer.train(
-    ['Translation_dataset/train.de', 'Translation_dataset/train.en'],
+tokenizer_src = CharBPETokenizer()
+tokenizer_src.train(
+    ['Translation_dataset/train.de'],
     vocab_size=5000,
     special_tokens=['<pad>', '<sos>', '<eos>']
     )
-tokenizer.save(directory='.', name='vocab')
-vocab = tokenizer.get_vocab()
-tokenizer.enable_padding(pad_id=0, pad_token='<pad>')
+
+src_vocab = tokenizer_src.get_vocab()
+tokenizer_src.enable_padding(pad_id=0, pad_token='<pad>')
+
+tokenizer_trg = CharBPETokenizer()
+tokenizer_trg.train(
+    ['Translation_dataset/train.en'],
+    vocab_size=5001,
+    special_tokens=['<pad>', '<sos>', '<eos>']
+    )
+
+trg_vocab = tokenizer_trg.get_vocab()
+tokenizer_trg.enable_padding(pad_id=0, pad_token='<pad>')
 
 # output = tokenizer.encode_batch(['mi chiamo giuseppe', '<sos> io sono io <eos>'])
 # output = tokenizer.post_process(output[1])
@@ -72,8 +82,8 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 epochs = 5
 clip = 1
 pad_ids = 0
-input_dim = tokenizer.get_vocab_size()
-output_dim = input_dim
+input_dim = tokenizer_src.get_vocab_size()
+output_dim = tokenizer_trg.get_vocab_size()
 model_type = 'TRANSF'
 if model_type == 'RNN':
     emb_dim = 300
@@ -123,7 +133,7 @@ if model_type == 'TRANSF':
         decoder,
         pad_ids,
         pad_ids,
-        device, 
+        device,
     ).to(device)
 
 if model_type == 'RNN':
@@ -133,7 +143,7 @@ if model_type == 'RNN':
 if model_type == 'CONV':
     encoder = convmodel.Encoder(input_dim, emb_dim, hid_dim, layers, kernel_size, conv_dropout, device)
     decoder = convmodel.Decoder(
-        input_dim,
+        output_dim,
         emb_dim,
         hid_dim,
         layers,
@@ -183,7 +193,7 @@ def train(model, iterator, optimizer, loss_function, clip):
     for input_batch, target_batch in iterator:
         model.train()
 
-        lens_input = list(map(len, [tokenizer.encode(x).ids for x in input_batch]))
+        lens_input = list(map(len, [tokenizer_src.encode(x).ids for x in input_batch]))
         batch_sorted = list(zip(lens_input, input_batch, target_batch))
         batch_sorted.sort(reverse=True)
         lens_input, input_batch, target_batch = zip(*(batch_sorted))
@@ -192,13 +202,13 @@ def train(model, iterator, optimizer, loss_function, clip):
         # print(input_batch[0])
         # print(target_batch[0])
 
-        input_batch = tokenizer.encode_batch(list(input_batch))
-        target_batch = tokenizer.encode_batch(list(target_batch))
+        input_batch = tokenizer_src.encode_batch(list(input_batch))
+        target_batch = tokenizer_trg.encode_batch(list(target_batch))
 
-        input_batch = [tokenizer.post_process(item).ids for item in input_batch]
+        input_batch = [tokenizer_src.post_process(item).ids for item in input_batch]
         input_batch = torch.tensor(input_batch).to(device).permute([1, 0])
 
-        target_batch = [tokenizer.post_process(item).ids for item in target_batch]
+        target_batch = [tokenizer_trg.post_process(item).ids for item in target_batch]
         target_batch = torch.tensor(target_batch).to(device).permute([1, 0]).contiguous()
 
         optimizer.zero_grad()
@@ -241,7 +251,7 @@ def train(model, iterator, optimizer, loss_function, clip):
 
         my_string = outputs.argmax(2)
 
-        print(tokenizer.decode(list(my_string[1:, 0])))
+        print(tokenizer_trg.decode(list(my_string[1:, 0])))
 
         print(loss.item())
 
@@ -256,7 +266,7 @@ def evaluate(model, iterator, criterion):
     with torch.no_grad():
         for input_batch, target_batch in iterator:
 
-            lens_input = list(map(len, [tokenizer.encode(x).ids for x in input_batch]))
+            lens_input = list(map(len, [tokenizer_src.encode(x).ids for x in input_batch]))
             batch_sorted = list(zip(lens_input, input_batch, target_batch))
             batch_sorted.sort(reverse=True)
             lens_input, input_batch, target_batch = zip(*(batch_sorted))
@@ -265,13 +275,13 @@ def evaluate(model, iterator, criterion):
             # print(input_batch[0])
             # print(target_batch[0])
 
-            input_batch = tokenizer.encode_batch(list(input_batch))
-            target_batch = tokenizer.encode_batch(list(target_batch))
+            input_batch = tokenizer_src.encode_batch(list(input_batch))
+            target_batch = tokenizer_trg.encode_batch(list(target_batch))
 
-            input_batch = [tokenizer.post_process(item).ids for item in input_batch]
+            input_batch = [tokenizer_src.post_process(item).ids for item in input_batch]
             input_batch = torch.tensor(input_batch).to(device).permute([1, 0]).contiguous()
 
-            target_batch = [tokenizer.post_process(item).ids for item in target_batch]
+            target_batch = [tokenizer_trg.post_process(item).ids for item in target_batch]
             target_batch = torch.tensor(target_batch).to(device).permute([1, 0]).contiguous()
             if model_type == 'RNN':
                 output = model(input_batch, lens_input, target_batch, 0)  # turn off teacher forcing
