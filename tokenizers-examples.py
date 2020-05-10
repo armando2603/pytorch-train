@@ -6,6 +6,7 @@ import seq2seqbetter
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import transformermodel
 from tokenizers import (BertWordPieceTokenizer, ByteLevelBPETokenizer,
                         CharBPETokenizer, SentencePieceBPETokenizer)
 from torch.utils.data import DataLoader
@@ -21,8 +22,8 @@ tokenizer.save(directory='.', name='vocab')
 vocab = tokenizer.get_vocab()
 tokenizer.enable_padding(pad_id=0, pad_token='<pad>')
 
-output = tokenizer.encode_batch(['mi chiamo giuseppe', '<sos> io sono io <eos>'])
-output = tokenizer.post_process(output[1])
+# output = tokenizer.encode_batch(['mi chiamo giuseppe', '<sos> io sono io <eos>'])
+# output = tokenizer.post_process(output[1])
 # print(output.ids, output.tokens)
 # print(tokenizer.decode(output.ids))
 train_input = []
@@ -71,22 +72,59 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 epochs = 5
 clip = 1
 pad_ids = 0
-model_type = 'CONV'
+input_dim = tokenizer.get_vocab_size()
+output_dim = input_dim
+model_type = 'TRANSF'
 if model_type == 'RNN':
-    input_dim = tokenizer.get_vocab_size()
-    output_dim = input_dim
     emb_dim = 300
     hid_dim = 200
     attn_dim = 40
     drop = 0.5
 
 if model_type == 'CONV':
-    input_dim = tokenizer.get_vocab_size()
     emb_dim = 300
     hid_dim = 512  # each conv. layer has 2 * hid_dim filters
     layers = 10  # number of conv. blocks in encoder
     kernel_size = 3
     conv_dropout = 0.25
+
+if model_type == 'TRANSF':
+    hid_dim = 256
+    enc_layers = 3
+    dec_layers = 3
+    enc_heads = 8
+    dec_heads = 8
+    enc_pf_dim = 512
+    dec_pf_dim = 512
+    enc_dropout = 0.1
+    dec_dropout = 0.1
+
+if model_type == 'TRANSF':
+    encoder = transformermodel.Encoder(
+        input_dim,
+        hid_dim,
+        enc_layers,
+        enc_heads,
+        enc_pf_dim,
+        enc_dropout,
+        device,
+    )
+    decoder = transformermodel.Decoder(
+        output_dim,
+        hid_dim,
+        dec_layers,
+        dec_heads,
+        dec_pf_dim,
+        dec_dropout,
+        device,
+    )
+    model = transformermodel.Seq2Seq(
+        encoder,
+        decoder,
+        pad_ids,
+        pad_ids,
+        device, 
+    ).to(device)
 
 if model_type == 'RNN':
     encoder = seq2seqbetter.Encoder(input_dim, emb_dim, hid_dim, hid_dim, drop)
@@ -110,12 +148,24 @@ val_loader = DataLoader(list(zip(val_input, val_gold)), batch_size=batch_size, s
 test_loader = DataLoader(list(zip(test_input, test_gold)), batch_size=batch_size, shuffle=True, drop_last=True)
 
 
-def init_weights(m: nn.Module):
-    for name, param in m.named_parameters():
-        if 'weight' in name:
-            nn.init.kaiming_normal_(param.data)
-        else:
-            nn.init.constant_(param.data, 0)
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+
+print(f'The model has {count_parameters(model):,} trainable parameters')
+
+
+if model_type == 'TRANSF':
+    def init_weights(m):
+        if hasattr(m, 'weight') and m.weight.dim() > 1:
+            nn.init.xavier_uniform_(m.weight.data)
+else:
+    def init_weights(m: nn.Module):
+        for name, param in m.named_parameters():
+            if 'weight' in name:
+                nn.init.kaiming_normal_(param.data)
+            else:
+                nn.init.constant_(param.data, 0)
 
 
 model.apply(init_weights)
@@ -162,8 +212,10 @@ def train(model, iterator, optimizer, loss_function, clip):
             logits = outputs[1:].view(-1, output_dim)
             target_batch = target_batch[1:].view(-1)
 
-        if model_type == 'CONV':
-            output, _ = model(input_batch.permute([1, 0]), target_batch.permute([1, 0])[:, :-1])
+        if model_type == 'CONV' or model_type == 'TRANSF':
+            input_batch = input_batch.permute([1, 0])
+            target_batch = target_batch.permute([1, 0])
+            output, _ = model(input_batch, target_batch[:, :-1])
 
             # output = [batch size, trg len - 1, output dim]
             # trg = [batch size, trg len]
@@ -173,7 +225,7 @@ def train(model, iterator, optimizer, loss_function, clip):
             output_dim = output.shape[-1]
 
             logits = output.contiguous().view(-1, output_dim)
-            target_batch = target_batch.permute([1, 0])[:, 1:].contiguous().view(-1)
+            target_batch = target_batch[:, 1:].contiguous().view(-1)
 
             # output = [batch size * trg len - 1, output dim]
             # trg = [batch size * trg len - 1]
@@ -189,9 +241,9 @@ def train(model, iterator, optimizer, loss_function, clip):
 
         my_string = outputs.argmax(2)
 
-        # print(tokenizer.decode(list(my_string[1:, 0])))
+        print(tokenizer.decode(list(my_string[1:, 0])))
 
-        # print(loss.item())
+        print(loss.item())
 
         epoch_loss += loss.item()
 
@@ -232,8 +284,10 @@ def evaluate(model, iterator, criterion):
 
                 # trg = [(trg len - 1) * batch size]
                 # output = [(trg len - 1) * batch size, output dim]
-            if model_type == 'CONV':
-                output, _ = model(input_batch.permute([1, 0]), target_batch.permute([1, 0])[:, :-1])
+            if model_type == 'CONV' or model_type == 'TRANSF':
+                input_batch = input_batch.permute([1, 0])
+                target_batch = target_batch.permute([1, 0])
+                output, _ = model(input_batch, target_batch[:, :-1])
 
                 # output = [batch size, trg len - 1, output dim]
                 # trg = [batch size, trg len]
@@ -241,7 +295,7 @@ def evaluate(model, iterator, criterion):
                 output_dim = output.shape[-1]
 
                 output = output.contiguous().view(-1, output_dim)
-                target_batch = target_batch.permute([1, 0])[:, 1:].contiguous().view(-1)
+                target_batch = target_batch[:, 1:].contiguous().view(-1)
 
                 # output = [batch size * trg len - 1, output dim]
                 # trg = [batch size * trg len - 1]
