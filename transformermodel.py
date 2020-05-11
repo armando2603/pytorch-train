@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class Encoder(nn.Module):
@@ -195,7 +196,8 @@ class PositionwiseFeedforwardLayer(nn.Module):
 
         # most of the model uses F.Gelu instead of relu
 
-        x = self.dropout(torch.relu(self.linear_1(x)))
+        # x = self.dropout(torch.relu(self.linear_1(x)))
+        x = self.dropout(F.gelu(self.linear_1(x)))
 
         # x : [batch_size, max_len, pf_dim]
 
@@ -221,7 +223,7 @@ class Decoder(nn.Module):
         super(Decoder, self).__init__()
         self.device = device
         self.tok_embedding = nn.Embedding(vocab_size, hid_dim)
-        self.pos_embedding = nn.Embedding(vocab_size, hid_dim)
+        self.pos_embedding = nn.Embedding(max_len, hid_dim)
         self.layers = nn.ModuleList(
             [DecoderLayer(
                 hid_dim,

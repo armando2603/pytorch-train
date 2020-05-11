@@ -193,12 +193,12 @@ def train(model, iterator, optimizer, loss_function, clip):
 
     for input_batch, target_batch in iterator:
         model.train()
-
-        lens_input = list(map(len, [tokenizer_src.encode(x).ids for x in input_batch]))
-        batch_sorted = list(zip(lens_input, input_batch, target_batch))
-        batch_sorted.sort(reverse=True)
-        lens_input, input_batch, target_batch = zip(*(batch_sorted))
-        lens_input = torch.tensor(lens_input).to(device=device)
+        if model_type == 'RNN':
+            lens_input = list(map(len, [tokenizer_src.encode(x).ids for x in input_batch]))
+            batch_sorted = list(zip(lens_input, input_batch, target_batch))
+            batch_sorted.sort(reverse=True)
+            lens_input, input_batch, target_batch = zip(*(batch_sorted))
+            lens_input = torch.tensor(lens_input).to(device=device)
 
         # print(input_batch[0])
         # print(target_batch[0])
@@ -266,12 +266,12 @@ def evaluate(model, iterator, criterion):
     epoch_loss = 0
     with torch.no_grad():
         for input_batch, target_batch in iterator:
-
-            lens_input = list(map(len, [tokenizer_src.encode(x).ids for x in input_batch]))
-            batch_sorted = list(zip(lens_input, input_batch, target_batch))
-            batch_sorted.sort(reverse=True)
-            lens_input, input_batch, target_batch = zip(*(batch_sorted))
-            lens_input = torch.tensor(lens_input).to(device=device)
+            if model_type == 'RNN':
+                lens_input = list(map(len, [tokenizer_src.encode(x).ids for x in input_batch]))
+                batch_sorted = list(zip(lens_input, input_batch, target_batch))
+                batch_sorted.sort(reverse=True)
+                lens_input, input_batch, target_batch = zip(*(batch_sorted))
+                lens_input = torch.tensor(lens_input).to(device=device)
 
             # print(input_batch[0])
             # print(target_batch[0])
