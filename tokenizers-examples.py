@@ -2,47 +2,102 @@ import math
 import time
 
 import convmodel
-# import transformermodel
-import original_transformer as transformermodel
+# import original_transformer as transformermodel
 import seq2seqbetter
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import transformermodel
 from tokenizers import (BertWordPieceTokenizer, ByteLevelBPETokenizer,
                         CharBPETokenizer, SentencePieceBPETokenizer)
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
-tokenizer_src = CharBPETokenizer()
+src_lang = 'fr'
+trg_lang = 'en'
+
+tokenizer_src = CharBPETokenizer(lowercase=True)
 tokenizer_src.train(
-    ['Translation_dataset/train.de'],
+    ['Translation_dataset/train.' + src_lang, 'Translation_dataset/train.' + trg_lang],
     vocab_size=5000,
-    special_tokens=['<pad>', '<sos>', '<eos>']
+    special_tokens=['<pad>', '<sos>', '<eos>'],
     )
 
 src_vocab = tokenizer_src.get_vocab()
 tokenizer_src.enable_padding(pad_id=0, pad_token='<pad>')
 
-tokenizer_trg = CharBPETokenizer()
-tokenizer_trg.train(
-    ['Translation_dataset/train.en'],
-    vocab_size=5001,
-    special_tokens=['<pad>', '<sos>', '<eos>']
-    )
+tokenizer_trg = tokenizer_src
+trg_vocab = src_vocab
 
-trg_vocab = tokenizer_trg.get_vocab()
-tokenizer_trg.enable_padding(pad_id=0, pad_token='<pad>')
+# tokenizer_trg = CharBPETokenizer(lowercase=True)
+# tokenizer_trg.train(
+#     ['Translation_dataset/train.en'],
+#     vocab_size=5001,
+#     special_tokens=['<pad>', '<sos>', '<eos>']
+#     )
+
+# trg_vocab = tokenizer_trg.get_vocab()
+# tokenizer_trg.enable_padding(pad_id=0, pad_token='<pad>')
+
+
+# class SSTDataset(Dataset):
+
+#     def __init__(self, filename, maxlen=95):
+
+#         # Store the contents of the file in a pandas dataframe
+#         self.input = []
+#         with open('Translation_dataset/train.de') as src_file:
+#             for line in src_file.readlines():
+#                 self.input.append('<sos> ' + line[:-1] + ' <eos>')
+#         self.gold_reference = []
+#         with open('Translation_dataset/train.en') as trg_file:
+#             for line in trg_file.readlines():
+#                 self.gold_reference.append('<sos> ' + line[:-1] + ' <eos>')
+
+#         self.maxlen = maxlen
+
+#         self.tokenizer = CharBPETokenizer()
+#         tokenizer_src.train(
+#             ['Translation_dataset/train.de'],
+#             vocab_size=5000,
+#             special_tokens=['<pad>', '<sos>', '<eos>']
+#             )
+
+#         tokenizer_src.enable_padding(pad_id=0, pad_token='<pad>')
+
+#     def __len__(self):
+#         return len(self.input)
+
+#     def __getitem__(self, index):
+
+#         # Selecting the sentence and label at the specified index in the data frame
+#         sentence = self.input[index]
+#         label = self.gold_reference[index]
+
+#         # tokenize the sentence
+#         encoded_sent = self.tokenizer.encode(sentence)
+
+#         # padding the sentence to the max length
+#         if len(encoded_sent) > self.maxlen:
+#             encoded_sent = encoded_sent[:self.maxlen - 2]
+#         padded_sent = encoded_sent + [0 for _ in range(self.maxlen - len(encoded_sent))]
+#         # Converting the list to a pytorch tensor
+#         tokens_ids_tensor = torch.tensor(padded_sent)  # Converting the list to a pytorch tensor
+#         # Obtaining the attention mask i.e a tensor containing 1s for no padded tokens and 0s for padded ones
+#         attn_mask = (tokens_ids_tensor != 0).long()
+
+#         return tokens_ids_tensor, attn_mask, label
 
 # output = tokenizer.encode_batch(['mi chiamo giuseppe', '<sos> io sono io <eos>'])
 # output = tokenizer.post_process(output[1])
 # print(output.ids, output.tokens)
 # print(tokenizer.decode(output.ids))
 train_input = []
-with open('Translation_dataset/train.de') as train_src_file:
+with open('Translation_dataset/train.' + src_lang) as train_src_file:
     for line in train_src_file.readlines():
         train_input.append('<sos> ' + line[:-1] + ' <eos>')
 train_gold = []
-with open('Translation_dataset/train.en') as train_trg_file:
+with open('Translation_dataset/train.' + trg_lang) as train_trg_file:
     for line in train_trg_file.readlines():
         train_gold.append('<sos> ' + line[:-1] + ' <eos>')
 
@@ -52,11 +107,11 @@ with open('Translation_dataset/train.en') as train_trg_file:
 
 val_input = []
 val_gold = []
-with open('Translation_dataset/val.de') as val_src_file:
+with open('Translation_dataset/val.' + src_lang) as val_src_file:
     for line in val_src_file.readlines():
         val_input.append('<sos> ' + line[:-1] + ' <eos>')
 
-with open('Translation_dataset/val.en') as val_trg_file:
+with open('Translation_dataset/val.' + trg_lang) as val_trg_file:
     for line in val_trg_file.readlines():
         val_gold.append('<sos> ' + line[:-1] + ' <eos>')
 
@@ -66,11 +121,11 @@ with open('Translation_dataset/val.en') as val_trg_file:
 
 test_input = []
 test_gold = []
-with open('Translation_dataset/test.de') as test_src_file:
+with open('Translation_dataset/test.' + src_lang) as test_src_file:
     for line in test_src_file.readlines():
         test_input.append('<sos> ' + line[:-1] + ' <eos>')
 
-with open('Translation_dataset/test.en') as test_trg_file:
+with open('Translation_dataset/test.' + trg_lang) as test_trg_file:
     for line in test_trg_file.readlines():
         test_gold.append('<sos> ' + line[:-1] + ' <eos>')
 
@@ -78,9 +133,10 @@ with open('Translation_dataset/test.en') as test_trg_file:
 #     for sample in test:
 #         test_file.write(' '.join(map(str, sample)) + '\n')
 
+
 batch_size = 50
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-epochs = 5
+epochs = 10
 clip = 1
 pad_ids = 0
 input_dim = tokenizer_src.get_vocab_size()
@@ -181,7 +237,7 @@ else:
 
 model.apply(init_weights)
 
-optimizer = optim.Adam(model.parameters())
+optimizer = optim.Adam(model.parameters(), lr=0.0005)
 
 
 loss_function = nn.CrossEntropyLoss(ignore_index=pad_ids)
@@ -200,8 +256,8 @@ def train(model, iterator, optimizer, loss_function, clip):
             lens_input, input_batch, target_batch = zip(*(batch_sorted))
             lens_input = torch.tensor(lens_input).to(device=device)
 
-        # print(input_batch[0])
-        # print(target_batch[0])
+        print(input_batch[0])
+        print(target_batch[0])
 
         input_batch = tokenizer_src.encode_batch(list(input_batch))
         target_batch = tokenizer_trg.encode_batch(list(target_batch))
@@ -250,11 +306,11 @@ def train(model, iterator, optimizer, loss_function, clip):
 
         model.eval()
 
-        # my_string = outputs.argmax(2)
+        my_string = outputs.argmax(2)
 
-        # print(tokenizer_trg.decode(list(my_string[1:, 0])))
+        print(tokenizer_trg.decode(list(my_string[1:, 0])))
 
-        # print(loss.item())
+        print(loss.item())
 
         epoch_loss += loss.item()
 
